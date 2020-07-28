@@ -1,0 +1,143 @@
+#Constants
+{{$NODE_MODE := DefaultParam .NODE_MODE "allnodes"}}
+{{$NODES_PER_NAMESPACE := DefaultParam .NODES_PER_NAMESPACE 1}}
+{{$PODS_PER_NODE := DefaultParam .PODS_PER_NODE 56}}
+{{$ENABLE_CHAOSMONKEY := false}}
+
+#Pod Resource Request
+{{$POD_CPU := DefaultParam .POD_CPU 20}}
+{{$POD_MEMORY := DefaultParam .POD_MEMORY 100}}
+
+#Variables
+{{$namespaces := DivideInt .Nodes $NODES_PER_NAMESPACE}}
+{{$podsPerNamespace := MultiplyInt $PODS_PER_NODE $NODES_PER_NAMESPACE}}
+{{$totalPods := MultiplyInt $podsPerNamespace $namespaces}}
+
+#Test Throughput Setup //TODO
+{{$SCHEDULER_THROUGHPUT_THRESHOLD := DefaultParam .CL2_SCHEDULER_THROUGHPUT_THRESHOLD 0}}
+{{$DENSITY_TEST_THROUGHPUT := DefaultParam .DENSITY_TEST_THROUGHPUT 100}}
+{{$MIN_SATURATION_PODS_TIMEOUT := 180}}
+{{$saturationDeploymentTimeout := DivideFloat $totalPods $DENSITY_TEST_THROUGHPUT | AddInt $MIN_SATURATION_PODS_TIMEOUT}}
+
+# Methods that don't work
+# APResponsiveness
+# CPUProfile
+# ETCD Metrics
+# Memory Profile
+# MetricsForE2E
+# Scheduling Metrics
+# OOM Tracking
+# InClusterNetworkLatency
+# DNSLookupLatency
+
+name: simple bring up
+namespace:
+  number: {{$namespaces}}
+tuningSets:
+- name: Uniform5qps
+  qpsLoad:
+    qps: 100
+
+steps:
+- name: Starting Measurements
+  measurements:
+  - Identifier: ScaleUpTimer
+    Method: Timer
+    Params:
+      action: start
+      label: scale_up_time
+  - Identifier: PodStartupLatency
+    Method: PodStartupLatency
+    Params:
+      action: start
+      labelSelector: group = nichotr
+      threshold: 1h
+  - Identifier: ResourceUsageSummary
+    Method: ResourceUsageSummary
+    Params:
+      action: start
+  - Identifier: SchedulingThroughput
+    Method: SchedulingThroughput
+    Params:
+      action: start
+
+- name: Creating saturation pods
+  phases:
+    - namespaceRange:
+        min: 1
+        max: {{$namespaces}}
+      replicasPerNamespace: 1
+      tuningSet: Uniform5qps
+      objectBundle:
+        - basename: deployment
+          objectTemplatePath: deployment.yaml
+          templateFillMap:
+            Replicas: {{$podsPerNamespace}}
+            Group: nichotr
+            CpuRequest: {{$POD_CPU}}m
+            MemoryRequest: {{$POD_MEMORY}}M
+
+- name: Collecting pod measurements
+- measurements:
+    - Identifier: WaitingForPods
+      Method: WaitForRunningPods
+      Params:
+        labelSelector: group = nichotr
+        desiredPodCount: {{$totalPods}}
+        timeout: 1h
+
+- name: Timing Separation For Scale Up
+- measurements:
+    - Identifier: ScaleUpTimer
+      Method: Timer
+      Params:
+        action: stop
+        label: scale_up_time
+    - Identifier: ScaleDownTimer
+      Method: Timer
+      Params:
+        action: start
+        label: scale_down_time
+
+- name: Deleting saturation pods
+  phases:
+    - namespaceRange:
+        min: 1
+        max: {{$namespaces}}
+      replicasPerNamespace: 0
+      tuningSet: Uniform5qps
+      objectBundle:
+        - basename: deployment
+          objectTemplatePath: deployment.yaml
+
+- name: Waiting for Deletion
+- measurements:
+    - Identifier: WaitingForPods
+      Method: WaitForRunningPods
+      Params:
+        labelSelector: group = nichotr
+        desiredPodCount: 0
+        timeout: 1h
+
+- name: Timing Separation for Scale Down
+- measurements:
+    - Identifier: ScaleDownTimer
+      Method: Timer
+      Params:
+        action: stop
+        label: scale_down_time
+    - Identifier: PodStartupLatency
+      Method: PodStartupLatency
+      Params:
+        action: gather
+    - Identifier: ResourceUsageSummary
+      Method: ResourceUsageSummary
+      Params:
+        action: gather
+    - Identifier: SchedulingThroughput
+      Method: SchedulingThroughput
+      Params:
+        action: gather
+
+
+
