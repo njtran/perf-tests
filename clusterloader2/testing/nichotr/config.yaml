@@ -1,19 +1,24 @@
-#Constants
-{{$NODE_MODE := DefaultParam .NODE_MODE "allnodes"}}
-{{$NODES_PER_NAMESPACE := DefaultParam .NODES_PER_NAMESPACE 1}}
-{{$PODS_PER_NODE := DefaultParam .PODS_PER_NODE 56}}
+# Constants
+{{$NODES_PER_NAMESPACE := DefaultParam .NODES_PER_NAMESPACE .Nodes}}
+{{$PODS_PER_NODE := DefaultParam .PODS_PER_NODE 10}}
 {{$ENABLE_CHAOSMONKEY := false}}
+{{$qps := DefaultParam .qps 10}}
+{{$KUBEMARK := true}}
 
-#Pod Resource Request
-{{$POD_CPU := DefaultParam .POD_CPU 20}}
-{{$POD_MEMORY := DefaultParam .POD_MEMORY 100}}
-
-#Variables
+# kubectl get node -o json | jq -r ".items[].status.allocatable.cpu"
+{{$NODE_FREE_CPU := DefaultParam .NODE_FREE_CPU 1}}
+# kubectl get node -o json | jq -r ".items[].status.allocatable.memory"
+# gets it in Ki - field is in MB
+{{$NODE_FREE_MEM := DefaultParam .NODE_FREE_MEM 3840}}
+# Variables
 {{$namespaces := DivideInt .Nodes $NODES_PER_NAMESPACE}}
 {{$podsPerNamespace := MultiplyInt $PODS_PER_NODE $NODES_PER_NAMESPACE}}
 {{$totalPods := MultiplyInt $podsPerNamespace $namespaces}}
+# Pod Resource Request
+{{$POD_CPU_MILLI := DivideFloat $NODE_FREE_CPU (MultiplyFloat $PODS_PER_NODE .9)}}
+{{$POD_MEMORY_MB := DivideFloat $NODE_FREE_MEM (MultiplyFloat $PODS_PER_NODE .9)}}
 
-#Test Throughput Setup //TODO
+# Test Throughput Setup //TODO
 {{$SCHEDULER_THROUGHPUT_THRESHOLD := DefaultParam .CL2_SCHEDULER_THROUGHPUT_THRESHOLD 0}}
 {{$DENSITY_TEST_THROUGHPUT := DefaultParam .DENSITY_TEST_THROUGHPUT 100}}
 {{$MIN_SATURATION_PODS_TIMEOUT := 180}}
@@ -26,17 +31,17 @@
 # Memory Profile
 # MetricsForE2E
 # Scheduling Metrics
-# OOM Tracking
+# OOM TrackingIt
 # InClusterNetworkLatency
 # DNSLookupLatency
 
-name: simple bring up
+name: Simple_Bring_Up
 namespace:
-  number: {{$namespaces}}
+  number: 1
 tuningSets:
-- name: Uniform5qps
+- name: Uniformqps
   qpsLoad:
-    qps: 100
+    qps: {{$qps}}
 
 steps:
 - name: Starting Measurements
@@ -52,10 +57,12 @@ steps:
       action: start
       labelSelector: group = nichotr
       threshold: 1h
+  {{if not $KUBEMARK}}
   - Identifier: ResourceUsageSummary
     Method: ResourceUsageSummary
     Params:
       action: start
+  {{end}}
   - Identifier: SchedulingThroughput
     Method: SchedulingThroughput
     Params:
@@ -65,17 +72,17 @@ steps:
   phases:
     - namespaceRange:
         min: 1
-        max: {{$namespaces}}
+        max: 1
       replicasPerNamespace: 1
-      tuningSet: Uniform5qps
+      tuningSet: Uniformqps
       objectBundle:
         - basename: deployment
           objectTemplatePath: deployment.yaml
           templateFillMap:
             Replicas: {{$podsPerNamespace}}
             Group: nichotr
-            CpuRequest: {{$POD_CPU}}m
-            MemoryRequest: {{$POD_MEMORY}}M
+            CpuRequest: {{$POD_CPU_MILLI}}m
+            MemoryRequest: {{$POD_MEMORY_MB}}M
 
 - name: Collecting pod measurements
 - measurements:
@@ -103,9 +110,9 @@ steps:
   phases:
     - namespaceRange:
         min: 1
-        max: {{$namespaces}}
+        max: 1
       replicasPerNamespace: 0
-      tuningSet: Uniform5qps
+      tuningSet: Uniformqps
       objectBundle:
         - basename: deployment
           objectTemplatePath: deployment.yaml
@@ -130,14 +137,13 @@ steps:
       Method: PodStartupLatency
       Params:
         action: gather
+    {{if not $KUBEMARK}}
     - Identifier: ResourceUsageSummary
       Method: ResourceUsageSummary
       Params:
         action: gather
+    {{end}}
     - Identifier: SchedulingThroughput
       Method: SchedulingThroughput
       Params:
         action: gather
-
-
-
