@@ -91,6 +91,25 @@ func WaitForPods(clientSet clientset.Interface, stopCh <-chan struct{}, options 
 			// We allow inactive pods (e.g. eviction happened).
 			// We wait until there is a desired number of pods running and all other pods are inactive.
 			if len(pods) == (podsStatus.Running+podsStatus.Inactive) && podsStatus.Running == podsStatus.RunningUpdated && podsStatus.RunningUpdated == options.DesiredPodCount {
+				podSchedules := make([]int, 0)
+				minVal := -1
+				for _, pod := range ps.List() {
+					for _, condition := range pod.Status.Conditions {
+						//fmt.Printf("This is the type: %s \n This is the status: %s \n This is the last probe time: %s \n This is the last Transition time: %s \n", condition.Type, condition.Status, condition.LastProbeTime, condition.LastTransitionTime)
+						if condition.Type == "Ready" {
+							fmt.Println(condition.LastTransitionTime)
+							initial := condition.LastTransitionTime.Hour()*3600 + condition.LastTransitionTime.Minute()*60 + condition.LastTransitionTime.Second()
+							if minVal == -1 || minVal >= initial {
+								minVal = initial
+							}
+							podSchedules = append(podSchedules, initial)
+						}
+					}
+				}
+				fmt.Println(len(podSchedules))
+				arr := fmt.Sprintf("%v", podSchedules)
+				arr = strings.ReplaceAll(arr, " ", ",")
+				fmt.Println(arr)
 				return nil
 			}
 			oldPods = pods
