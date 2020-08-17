@@ -76,7 +76,7 @@ func (ste *simpleExecutor) ExecuteTest(ctx Context, conf *api.Config) *errors.Er
 
 	for _, summary := range ctx.GetManager().GetSummaries() {
 		if ctx.GetClusterLoaderConfig().ReportDir == "" {
-			klog.V(2).Infof("%v: %v", summary.SummaryName(), summary.SummaryContent())
+			klog.Infof("%v: %v", summary.SummaryName(), summary.SummaryContent())
 		} else {
 			testDistinctor := ""
 			if ctx.GetClusterLoaderConfig().TestScenario.Identifier != "" {
